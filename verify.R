@@ -1,0 +1,32 @@
+# Verification run: cluster-robust SEs on the project data
+pk <- c("plm","lmtest","sandwich")
+for (p in pk) if (!requireNamespace(p, quietly=TRUE)) install.packages(p, repos="https://cloud.r-project.org")
+suppressMessages({library(plm);library(lmtest);library(sandwich)})
+out <- path.expand("~/Downloads/r_verify_output.txt")
+sink(out)
+d <- read.csv(path.expand("~/Downloads/final_data.csv"))
+cat("N =", nrow(d), " countries =", length(unique(d$Country.Name)), "\n")
+d$Y2020 <- as.numeric(d$Year==2020); d$Y2021 <- as.numeric(d$Year==2021)
+p <- pdata.frame(d, index=c("Country.Name","Year"))
+f <- LifeExp ~ logGDP + HealthExp + Education + Unemployment
+cl <- function(x) vcovHC(x, method="arellano", type="HC1", cluster="group")
+show <- function(nm, m) { cat("\n==", nm, " N=", nobs(m), "\n"); print(round(coeftest(m, vcov=cl), 4)) }
+show("Pooled", plm(f, p, model="pooling"))
+show("FE", plm(f, p, model="within"))
+show("TWFE", plm(f, p, model="within", effect="twoways"))
+show("FE + COVID2021 (2020-21)", plm(update(f,.~.+COVID2021), p, model="within"))
+show("FE + Y2020 + Y2021", plm(update(f,.~.+Y2020+Y2021), p, model="within"))
+yr <- as.numeric(as.character(p$Year))
+show("FE excl 2020-21", plm(f, p[!(yr %in% c(2020,2021)),], model="within"))
+show("FE 2010-19", plm(f, p[yr<=2019,], model="within"))
+p$logGDP_lag <- lag(p$logGDP,1); pl <- p[!is.na(p$logGDP_lag),]
+fl <- LifeExp ~ logGDP_lag + HealthExp + Education + Unemployment
+show("FE lag", plm(fl, pl, model="within"))
+show("TWFE lag", plm(fl, pl, model="within", effect="twoways"))
+full <- names(which(table(d$Country.Name)==14))
+show("FE balanced", plm(f, p[p$Country.Name %in% full,], model="within"))
+show("FE high income", plm(f, p[p$HighIncome==1,], model="within"))
+show("FE other", plm(f, p[p$HighIncome==0,], model="within"))
+show("FE interactions", plm(LifeExp ~ (logGDP+HealthExp+Education+Unemployment)*HighIncome, p, model="within"))
+sink()
+cat("done\n")
